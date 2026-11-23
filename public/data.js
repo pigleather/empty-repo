@@ -1,62 +1,85 @@
-// data.js – Loads all CSVs in the repo and renders them into HTML tables.
-// Requires: <https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js>
+/* data.js – loads CSVs, builds a DataTable, and shows a modal on row click */
 
-const csvFiles = ['all_teams.csv', 'games.csv'];
+/* ------------------------------------------------------------------ */
+/* Configuration                                                     */
+/* ------------------------------------------------------------------ */
+const csvFiles = ['all_teams.csv', 'games.csv'];   // files to load
 
-function renderTable(title, header, rows) {
-  const tbl = document.createElement('table');
-  // Title row
-  const titleRow = document.createElement('tr');
-  const thTitle = document.createElement('th');
-  thTitle.setAttribute("colspan", String(header.length));
-  thTitle.textContent = title;
-  titleRow.appendChild(thTitle);
-  tbl.appendChild(titleRow);
-
-  // Header row
-  const headerRow = document.createElement('tr');
-  for (const h of header) {
-    const th = document.createElement('th');
-    th.textContent = h;
-    headerRow.appendChild(th);
-  }
-  tbl.appendChild(headerRow);
-
-  // Data rows
-  for (const r of rows) {
-    const tr = document.createElement('tr');
-    for (const c of r) {
-      const td = document.createElement('td');
-      td.textContent = c;
-      tr.appendChild(td);
-    }
-    tbl.appendChild(tr);
-  }
-
-  return tbl;
-}
-
-function loadCsv(path, cb) {
+/* ------------------------------------------------------------------ */
+/* Helper: fetch CSV via PapaParse                                 */
+/* ------------------------------------------------------------------ */
+function loadCsv(path, callback) {
   fetch(path)
     .then(r => r.text())
     .then(txt => {
       const data = Papa.parse(txt, { header: true, skipEmptyLines: true });
-      cb(data);
+      callback(data);
+    })
+    .catch(err => console.error('Failed to load', path, err));
+}
+
+/* ------------------------------------------------------------------ */
+/* Helper: build a DataTable from parsed CSV                      */
+/* ------------------------------------------------------------------ */
+function renderDataTable(title, data) {
+  const tableId = `table-${title.replace(/\s+/g, '-')}`;   // unique id
+
+  /* Build header row */
+  const headerRow = $('<tr>');
+  Object.keys(data.data[0]).forEach(key => {
+    headerRow.append($('<th>').text(key));
+  });
+
+  /* Build body rows (each <tr> gets a data-attribute for easy retrieval) */
+  const tbodyRows = data.data.map(rowObj => {
+    const tr = $('<tr>');
+    Object.values(rowObj).forEach(val => {
+      tr.append($('<td>').text(val));
     });
-}
-
-async function init() {
-  const container = document.getElementById('tables');
-  loadCsv('all_teams.csv', data => {
-    const rows = data.data.map(r => Object.values(r));
-    const header = Object.keys(data.data[0]);
-    container.appendChild(renderTable('All Teams', header, rows));
+    // Store the whole row in a JSON string on the <tr>
+    tr.attr('data-row', JSON.stringify(rowObj));
+    return tr;
   });
 
-  loadCsv('games.csv', data => {
-    const rows = data.data.map(r => Object.values(r));
-    const header = Object.keys(data.data[0]);
-    container.appendChild(renderTable('Games', header, rows));
-  });
+  /* Assemble the table */
+  const tbl = $(`<table id="${tableId}" class="display" style="width:100%"></table>`);
+  tbl.append($('<thead>').append(headerRow));
+  tbl.append($('<tbody>').append(tbodyRows));
+
+  /* Wrap with a container that has a title */
+  const container = $('<div>');
+  container.append(`<h3>${title}</h3>`).append(tbl);
+
+  return { container, tableId };
 }
-init();
+
+/* ------------------------------------------------------------------ */
+/* Main: load both CSVs, render tables and attach modal logic   */
+/* ------------------------------------------------------------------ */
+$(function () {
+  /* Container that will hold all tables */
+  const $tables = $('#tables');
+
+  csvFiles.forEach(csv => {
+    loadCsv(csv, data => {
+      const { container, tableId } = renderDataTable(csv.replace('.csv', '').replace(/_/g, ' ').toUpperCase(), data);
+      $tables.append(container);
+
+      /* Initialise DataTables – it gives sorting, filtering, pagination */
+      $(`#${tableId}`).DataTable();
+
+      /* Row click: open modal with all details for that row */
+      $(`#${tableId} tbody tr`).on('click', function () {
+        const rowData = JSON.parse($(this).attr('data-row'));
+        const bodyHtml = Object.entries(rowData)
+          .map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`) 
+          .join('');
+        $('#modalBody').html(`<table class="table"><tbody>${bodyHtml}</tbody></table>`);
+
+        /* Show modal */
+        const modal = new bootstrap.Modal(document.getElementById('rowModal'));
+        modal.show();
+      });
+    });
+  });
+});
